@@ -1,7 +1,7 @@
 {
   "name": "@nubiia/mcp-hubspot",
   "version": "0.4.0",
-  "description": "Model Context Protocol server for HubSpot CRM - Enterprise-grade HubSpot MCP implementation",
+  "description": "HubSpot MCP server for AI assistants like Claude: contacts, deals, pipelines, owners, custom objects, engagements, and CRM automation. Built by Nubiia.",
   "type": "module",
   "bin": {
     "mcp-hubspot": "./dist/index.js"
@@ -35,12 +35,20 @@
     "mcp",
     "model-context-protocol",
     "hubspot",
+    "hubspot-api",
+    "hubspot-mcp",
     "crm",
+    "crm-api",
     "sales",
+    "deals",
+    "contacts",
+    "pipelines",
+    "automation",
     "ai",
     "llm",
     "claude",
-    "anthropic"
+    "anthropic",
+    "nubiia"
   ],
   "author": {
     "name": "Nubiia",

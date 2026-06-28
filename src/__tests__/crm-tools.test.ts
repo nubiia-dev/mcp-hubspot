@@ -82,9 +82,9 @@ function batchResponse<T>(results: T[]) {
 // ---------------------------------------------------------------------------
 
 describe('getCrmTools', () => {
-  it('returns exactly 11 tools', () => {
+  it('returns exactly 13 tools', () => {
     const { tools } = makeTools();
-    expect(tools).toHaveLength(11);
+    expect(tools).toHaveLength(13);
   });
 
   it('contains every expected tool name', () => {
@@ -102,6 +102,8 @@ describe('getCrmTools', () => {
       'hubspot_crm_batch_update',
       'hubspot_crm_batch_archive',
       'hubspot_crm_batch_upsert',
+      'hubspot_search_by_property',
+      'hubspot_search_recent',
     ];
     for (const name of expected) {
       expect(names).toContain(name);
@@ -908,5 +910,184 @@ describe('hubspot_crm_batch_read — propertiesWithHistory', () => {
       propertiesWithHistory: string[];
     };
     expect(body.propertiesWithHistory).toEqual(['amount', 'dealstage']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite: hubspot_search_by_property
+// ---------------------------------------------------------------------------
+
+describe('hubspot_search_by_property', () => {
+  it('POSTs to the /search endpoint with the right single filter', async () => {
+    const fetchMock = mockFetchSuccess({ results: [DEAL_FIXTURE], paging: null });
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_by_property');
+
+    const result = await tool.handler({
+      objectType: 'deals',
+      propertyName: 'dealname',
+      value: 'Acme',
+      operator: 'CONTAINS_TOKEN',
+      properties: ['dealname', 'amount'],
+    });
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(url).toContain('/crm/v3/objects/deals/search');
+    expect(requestInit.method).toBe('POST');
+
+    const body = JSON.parse(requestInit.body as string) as {
+      filterGroups: { filters: { propertyName: string; operator: string; value: string }[] }[];
+      properties: string[];
+    };
+    expect(body.filterGroups[0].filters[0]).toEqual({
+      propertyName: 'dealname',
+      operator: 'CONTAINS_TOKEN',
+      value: 'Acme',
+    });
+    expect(body.properties).toEqual(['dealname', 'amount']);
+    expect(result).toMatchObject({ results: [expect.objectContaining({ id: '111' })] });
+  });
+
+  it('defaults the operator to EQ when omitted', async () => {
+    const fetchMock = mockFetchSuccess({ results: [], paging: null });
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_by_property');
+
+    await tool.handler({
+      objectType: 'contacts',
+      propertyName: 'email',
+      value: 'jane@example.com',
+    });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(requestInit.body as string) as {
+      filterGroups: { filters: { operator: string }[] }[];
+    };
+    expect(body.filterGroups[0].filters[0].operator).toBe('EQ');
+  });
+
+  it('throws ZodError when propertyName is missing', async () => {
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_by_property');
+
+    await expect(tool.handler({ objectType: 'deals', value: 'Acme' })).rejects.toThrow();
+  });
+
+  it('returns isError on HubSpot API error', async () => {
+    mockFetchError({ status: 'error', message: 'Missing scopes' }, 403);
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_by_property');
+
+    const result = (await tool.handler({
+      objectType: 'deals',
+      propertyName: 'dealname',
+      value: 'Acme',
+    })) as { isError: boolean };
+    expect(result.isError).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Suite: hubspot_search_recent
+// ---------------------------------------------------------------------------
+
+describe('hubspot_search_recent', () => {
+  it('resolves hs_lastmodifieddate for field=modified with a DESCENDING sort', async () => {
+    const fetchMock = mockFetchSuccess({ results: [DEAL_FIXTURE], paging: null });
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_recent');
+
+    const result = await tool.handler({
+      objectType: 'deals',
+      since: '2025-01-01T00:00:00Z',
+      properties: ['dealname'],
+    });
+
+    const url = fetchMock.mock.calls[0][0] as string;
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    expect(url).toContain('/crm/v3/objects/deals/search');
+    expect(requestInit.method).toBe('POST');
+
+    const body = JSON.parse(requestInit.body as string) as {
+      filterGroups: { filters: { propertyName: string; operator: string; value: string }[] }[];
+      sorts: { propertyName: string; direction: string }[];
+    };
+    expect(body.filterGroups[0].filters[0]).toEqual({
+      propertyName: 'hs_lastmodifieddate',
+      operator: 'GTE',
+      value: '2025-01-01T00:00:00Z',
+    });
+    expect(body.sorts[0]).toEqual({
+      propertyName: 'hs_lastmodifieddate',
+      direction: 'DESCENDING',
+    });
+    expect(result).toMatchObject({ results: [expect.objectContaining({ id: '111' })] });
+  });
+
+  it('resolves createdate for field=created', async () => {
+    const fetchMock = mockFetchSuccess({ results: [], paging: null });
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_recent');
+
+    await tool.handler({
+      objectType: 'deals',
+      since: '1735689600000',
+      field: 'created',
+    });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(requestInit.body as string) as {
+      filterGroups: { filters: { propertyName: string }[] }[];
+      sorts: { propertyName: string; direction: string }[];
+    };
+    expect(body.filterGroups[0].filters[0].propertyName).toBe('createdate');
+    expect(body.sorts[0]).toEqual({ propertyName: 'createdate', direction: 'DESCENDING' });
+  });
+
+  it('honors the dateProperty override (e.g., contacts lastmodifieddate)', async () => {
+    const fetchMock = mockFetchSuccess({ results: [], paging: null });
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_recent');
+
+    await tool.handler({
+      objectType: 'contacts',
+      since: '2025-06-01T00:00:00Z',
+      dateProperty: 'lastmodifieddate',
+    });
+
+    const requestInit = fetchMock.mock.calls[0][1] as RequestInit;
+    const body = JSON.parse(requestInit.body as string) as {
+      filterGroups: { filters: { propertyName: string }[] }[];
+      sorts: { propertyName: string }[];
+    };
+    expect(body.filterGroups[0].filters[0].propertyName).toBe('lastmodifieddate');
+    expect(body.sorts[0].propertyName).toBe('lastmodifieddate');
+  });
+
+  it('throws ZodError when since is missing', async () => {
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_recent');
+
+    await expect(tool.handler({ objectType: 'deals' })).rejects.toThrow();
+  });
+
+  it('returns isError on HubSpot API error', async () => {
+    mockFetchError({ status: 'error', message: 'Server error' }, 500);
+
+    const { tools } = makeTools();
+    const tool = getTool(tools, 'hubspot_search_recent');
+
+    const result = (await tool.handler({
+      objectType: 'deals',
+      since: '2025-01-01T00:00:00Z',
+    })) as { isError: boolean };
+    expect(result.isError).toBe(true);
   });
 });

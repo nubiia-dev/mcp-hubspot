@@ -1,7 +1,7 @@
 /**
  * Generic CRM tools for HubSpot MCP server — Phase 1 (Sales + Engagements).
  *
- * This module exposes 11 tools parametrized by `objectType`, covering the full
+ * This module exposes 13 tools parametrized by `objectType`, covering the full
  * HubSpot v3 CRM object surface for all 12 standard types:
  * - Core objects: contacts, companies, tickets
  * - Sales objects: deals, line_items, products, quotes
@@ -21,6 +21,8 @@
  * 9.  hubspot_crm_batch_update  — POST /crm/v3/objects/{type}/batch/update
  * 10. hubspot_crm_batch_archive — POST /crm/v3/objects/{type}/batch/archive
  * 11. hubspot_crm_batch_upsert  — POST /crm/v3/objects/{type}/batch/upsert
+ * 12. hubspot_search_by_property — POST /crm/v3/objects/{type}/search (guided single-property filter)
+ * 13. hubspot_search_recent     — POST /crm/v3/objects/{type}/search (guided created/modified-since filter)
  *
  * Implementation notes:
  * - All search operations use `client.search()` which applies the stricter search rate limiter.
@@ -480,6 +482,18 @@ function buildSearchTool(client: HubSpotClient): Tool {
     description:
       'Search HubSpot CRM records using filters, sorts, and full-text query. Applies to all ' +
       'object types. Supports up to 5 filter groups (OR-ed) with up to 6 filters per group (AND-ed). ' +
+      'FILTERGROUPS GUIDANCE: each filter is { propertyName, operator, value }. Filters WITHIN the ' +
+      'same group are combined with AND; separate groups are combined with OR. ' +
+      'Common operators: EQ (equals), NEQ (not equals), CONTAINS_TOKEN (word/substring match, ' +
+      'use "*term*" wildcards), HAS_PROPERTY (value is set — no `value` field needed), ' +
+      'BETWEEN (range — provide `value` as the low bound and `highValue` as the high bound), ' +
+      'IN (matches any of `values` array — use `values` not `value`). ' +
+      'EXAMPLE — deals with amount >= 1000 AND stage = closedwon, OR named "Acme": ' +
+      '[{"filters":[{"propertyName":"amount","operator":"GTE","value":"1000"},' +
+      '{"propertyName":"dealstage","operator":"EQ","value":"closedwon"}]},' +
+      '{"filters":[{"propertyName":"dealname","operator":"CONTAINS_TOKEN","value":"Acme"}]}]. ' +
+      'For simple single-property lookups, prefer hubspot_search_by_property; for created/modified-since ' +
+      'queries, prefer hubspot_search_recent. ' +
       'IMPORTANT NOTES: ' +
       '(1) Search has stricter rate limits (~5 req/s per token) than regular reads — avoid polling. ' +
       '(2) Search has an indexing latency of several seconds — do NOT use immediately after create/update. ' +
@@ -969,11 +983,255 @@ function buildBatchUpsertTool(client: HubSpotClient): Tool {
 }
 
 // ---------------------------------------------------------------------------
+// Tool 12: hubspot_search_by_property
+// ---------------------------------------------------------------------------
+
+function buildSearchByPropertyTool(client: HubSpotClient): Tool {
+  const schema = z.object({
+    objectType: ObjectTypeSchema,
+    propertyName: z
+      .string()
+      .min(1)
+      .describe('HubSpot property internal name to filter on (e.g., "email", "dealname").'),
+    value: z.string().describe('Value to match against the property.'),
+    operator: z
+      .enum(['EQ', 'NEQ', 'CONTAINS_TOKEN', 'GT', 'GTE', 'LT', 'LTE'])
+      .default('EQ')
+      .describe('Comparison operator. Default: EQ (exact match).'),
+    properties: z
+      .array(z.string())
+      .optional()
+      .describe('Property names to return. Always specify — HubSpot omits non-default properties.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(10)
+      .describe('Records per response (1–100). Default: 10.'),
+    after: z.string().optional().describe('Pagination cursor from `paging.next.after`.'),
+  });
+
+  return {
+    name: 'hubspot_search_by_property',
+    description:
+      'Find HubSpot CRM records where a single property matches a value — a guided shortcut over ' +
+      'hubspot_crm_search that builds the filterGroups for you (no hand-written filter JSON). ' +
+      'Applies to all object types. Provide `propertyName`, `value`, and optionally an `operator` ' +
+      '(EQ exact match [default], NEQ not-equal, CONTAINS_TOKEN word/substring match, or the ' +
+      'numeric/date comparisons GT/GTE/LT/LTE). ' +
+      'IMPORTANT: Specify `properties` explicitly — HubSpot returns only defaults otherwise. ' +
+      'For multi-condition queries (AND/OR across several properties) use hubspot_crm_search instead. ' +
+      'Returns the raw HubSpot search response — paginate using `paging.next.after`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objectType: OBJECT_TYPE_JSON,
+        propertyName: {
+          type: 'string',
+          minLength: 1,
+          description: 'HubSpot property internal name to filter on (e.g., "email", "dealname").',
+        },
+        value: {
+          type: 'string',
+          description: 'Value to match against the property.',
+        },
+        operator: {
+          type: 'string',
+          enum: ['EQ', 'NEQ', 'CONTAINS_TOKEN', 'GT', 'GTE', 'LT', 'LTE'],
+          default: 'EQ',
+          description:
+            'Comparison operator: EQ (exact, default), NEQ (not equal), CONTAINS_TOKEN ' +
+            '(word/substring match), or GT/GTE/LT/LTE (numeric/date comparisons).',
+        },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Property names to return. Always specify — HubSpot omits non-default properties.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          default: 10,
+          description: 'Records per response (1–100). Default: 10.',
+        },
+        after: AFTER_CURSOR_JSON,
+      },
+      required: ['objectType', 'propertyName', 'value'],
+      additionalProperties: false,
+    },
+    handler: async (rawArgs: unknown) => {
+      const args = schema.parse(rawArgs);
+      const validType = validateObjectType(args.objectType);
+      const config = (await import('../../utils/object-types.js')).getObjectTypeConfig(validType);
+
+      try {
+        const searchBody: Record<string, unknown> = {
+          filterGroups: [
+            {
+              filters: [
+                {
+                  propertyName: args.propertyName,
+                  operator: args.operator,
+                  value: args.value,
+                },
+              ],
+            },
+          ],
+          limit: args.limit,
+        };
+        if (args.properties !== undefined) searchBody['properties'] = args.properties;
+        if (args.after !== undefined) searchBody['after'] = args.after;
+
+        const result = await client.search<CollectionResponse<SimplePublicObject>>(
+          `/${config.basePath}/search`,
+          searchBody
+        );
+        return result;
+      } catch (error) {
+        return handleToolError(error);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Tool 13: hubspot_search_recent
+// ---------------------------------------------------------------------------
+
+function buildSearchRecentTool(client: HubSpotClient): Tool {
+  const schema = z.object({
+    objectType: ObjectTypeSchema,
+    since: z
+      .string()
+      .min(1)
+      .describe('Moment to search from: ISO 8601 timestamp or epoch milliseconds.'),
+    field: z
+      .enum(['modified', 'created'])
+      .default('modified')
+      .describe('Whether to match on last-modified or created time. Default: modified.'),
+    dateProperty: z
+      .string()
+      .optional()
+      .describe(
+        'Override the date property used (e.g., "lastmodifieddate" for contacts). ' +
+          'When omitted, resolves from `field`.'
+      ),
+    properties: z
+      .array(z.string())
+      .optional()
+      .describe('Property names to return. Always specify — HubSpot omits non-default properties.'),
+    limit: z
+      .number()
+      .int()
+      .min(1)
+      .max(100)
+      .default(10)
+      .describe('Records per response (1–100). Default: 10.'),
+    after: z.string().optional().describe('Pagination cursor from `paging.next.after`.'),
+  });
+
+  return {
+    name: 'hubspot_search_recent',
+    description:
+      'Find HubSpot CRM records created or modified since a given moment — a guided shortcut over ' +
+      'hubspot_crm_search that builds the filterGroups and sort for you. Applies to all object types. ' +
+      'Provide `since` (ISO 8601 timestamp or epoch milliseconds) and optionally `field` ' +
+      '("modified" [default] → hs_lastmodifieddate, or "created" → createdate). ' +
+      'Results are sorted by that date property DESCENDING (most recent first). ' +
+      'NOTE: the `contacts` object uses `lastmodifieddate` (not hs_lastmodifieddate) for modified ' +
+      'time — pass `dateProperty: "lastmodifieddate"` to override when searching contacts. ' +
+      'IMPORTANT: Specify `properties` explicitly — HubSpot returns only defaults otherwise. ' +
+      'Returns the raw HubSpot search response — paginate using `paging.next.after`.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        objectType: OBJECT_TYPE_JSON,
+        since: {
+          type: 'string',
+          minLength: 1,
+          description: 'Moment to search from: ISO 8601 timestamp or epoch milliseconds.',
+        },
+        field: {
+          type: 'string',
+          enum: ['modified', 'created'],
+          default: 'modified',
+          description:
+            'Whether to match on last-modified (hs_lastmodifieddate) or created (createdate) time. ' +
+            'Default: modified.',
+        },
+        dateProperty: {
+          type: 'string',
+          description:
+            'Override the date property used (e.g., "lastmodifieddate" for contacts). ' +
+            'When omitted, resolves from `field`.',
+        },
+        properties: {
+          type: 'array',
+          items: { type: 'string' },
+          description:
+            'Property names to return. Always specify — HubSpot omits non-default properties.',
+        },
+        limit: {
+          type: 'integer',
+          minimum: 1,
+          maximum: 100,
+          default: 10,
+          description: 'Records per response (1–100). Default: 10.',
+        },
+        after: AFTER_CURSOR_JSON,
+      },
+      required: ['objectType', 'since'],
+      additionalProperties: false,
+    },
+    handler: async (rawArgs: unknown) => {
+      const args = schema.parse(rawArgs);
+      const validType = validateObjectType(args.objectType);
+      const config = (await import('../../utils/object-types.js')).getObjectTypeConfig(validType);
+
+      // Resolve which date property to filter and sort on.
+      const resolvedProperty =
+        args.dateProperty ?? (args.field === 'created' ? 'createdate' : 'hs_lastmodifieddate');
+
+      try {
+        const searchBody: Record<string, unknown> = {
+          filterGroups: [
+            {
+              filters: [
+                {
+                  propertyName: resolvedProperty,
+                  operator: 'GTE',
+                  value: args.since,
+                },
+              ],
+            },
+          ],
+          sorts: [{ propertyName: resolvedProperty, direction: 'DESCENDING' }],
+          limit: args.limit,
+        };
+        if (args.properties !== undefined) searchBody['properties'] = args.properties;
+        if (args.after !== undefined) searchBody['after'] = args.after;
+
+        const result = await client.search<CollectionResponse<SimplePublicObject>>(
+          `/${config.basePath}/search`,
+          searchBody
+        );
+        return result;
+      } catch (error) {
+        return handleToolError(error);
+      }
+    },
+  };
+}
+
+// ---------------------------------------------------------------------------
 // Domain entry point
 // ---------------------------------------------------------------------------
 
 /**
- * Returns all 11 generic CRM tools parametrized by `objectType`.
+ * Returns all 13 generic CRM tools parametrized by `objectType`.
  *
  * Covers HubSpot v3 CRM object operations for all 12 standard types:
  * - Core objects: contacts, companies, tickets
@@ -986,7 +1244,7 @@ function buildBatchUpsertTool(client: HubSpotClient): Tool {
  * authentication, rate limiting, retry, and error parsing.
  *
  * @param client - Authenticated HubSpotClient instance.
- * @returns Array of 11 Tool objects ready for MCP registration.
+ * @returns Array of 13 Tool objects ready for MCP registration.
  *
  * @example
  * import { getCrmTools } from './tools/crm/index.js';
@@ -1006,5 +1264,7 @@ export function getCrmTools(client: HubSpotClient): Tool[] {
     buildBatchUpdateTool(client),
     buildBatchArchiveTool(client),
     buildBatchUpsertTool(client),
+    buildSearchByPropertyTool(client),
+    buildSearchRecentTool(client),
   ];
 }

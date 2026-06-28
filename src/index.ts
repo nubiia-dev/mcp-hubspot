@@ -36,6 +36,7 @@ import { getActionsTools } from './tools/actions/index.js';
 import { getOwnersTools } from './tools/owners/index.js';
 import { getPipelinesTools } from './tools/pipelines/index.js';
 import { getSchemasTools } from './tools/schemas/index.js';
+import { getEngagementsTools } from './tools/engagements/index.js';
 import { setupResources } from './resources/index.js';
 import { setupPrompts } from './prompts/index.js';
 
@@ -59,7 +60,7 @@ if (!ACCESS_TOKEN) {
   console.error('  "mcpServers": {');
   console.error('    "hubspot": {');
   console.error('      "command": "npx",');
-  console.error('      "args": ["-y", "@iamsamuelfraga/mcp-hubspot"],');
+  console.error('      "args": ["-y", "@nubiia/mcp-hubspot"],');
   console.error('      "env": {');
   console.error('        "HUBSPOT_ACCESS_TOKEN": "pat-na1-xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"');
   console.error('      }');
@@ -103,6 +104,8 @@ function registerToolGroups(client: HubSpotClient): ToolGroup[] {
     { toolsets: ['sales', 'engagements'], tools: getCrmTools(client) },
     // Sales-specific helpers (deals merge, quotes assemble).
     { toolsets: ['sales'], tools: getSalesTools(client) },
+    // Engagements helper — log a note/call/email/meeting/task + associate in one step.
+    { toolsets: ['engagements'], tools: getEngagementsTools(client) },
     { toolsets: ['associations'], tools: getAssociationsTools(client) },
     { toolsets: ['properties'], tools: getPropertiesTools(client) },
     // Owners — resolve hubspot_owner_id values to real users (name/email).
@@ -151,7 +154,7 @@ for (const group of registerToolGroups(client)) {
 const server = new Server(
   {
     name: 'hubspot-mcp',
-    version: '0.3.0',
+    version: '0.4.0',
   },
   {
     capabilities: {

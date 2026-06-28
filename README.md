@@ -3,24 +3,31 @@
 [![npm version](https://img.shields.io/npm/v/@nubiia/mcp-hubspot.svg)](https://www.npmjs.com/package/@nubiia/mcp-hubspot)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 [![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20.18.0-brightgreen.svg)](https://nodejs.org)
+[![by Nubiia](https://img.shields.io/badge/by-Nubiia-6C4EE3)](https://nubiia.es)
 
 **The most complete HubSpot MCP server for Claude.**
 
-A Model Context Protocol (MCP) server that gives Claude comprehensive, enterprise-grade access to HubSpot CRM — covering contacts, deals, quotes, workflows, automation callbacks, and more, all through 37 battle-tested tools.
+A Model Context Protocol (MCP) server that gives Claude comprehensive, enterprise-grade access to HubSpot CRM — covering contacts, companies, deals, tickets, quotes, owners, pipelines, custom object schemas, engagements, workflows, and more, all through 54 battle-tested tools (70 with a developer key).
+
+> Built and maintained by **[Nubiia](https://nubiia.es)** — automatización e integraciones con IA para negocios (MCP, HubSpot, Pipedrive, Holded y más). ¿Quieres algo así para tu empresa? Escríbenos en **[nubiia.es](https://nubiia.es)**.
 
 ---
 
 ## Features
 
-- **37 Tools Across 7 Domains** (+ 16 with developer key = 53 total) — complete coverage of the HubSpot CRM API surface
+- **54 Tools Across 10 Toolsets** (+ 16 with developer key = 70 total) — complete coverage of the HubSpot CRM API surface
 - **Workflow Automation v4 BETA** — create, update, monitor, and delete automation workflows
 - **Contact Enrollment** — enroll and unenroll any CRM object in a workflow
 - **CRM Object CRUD** — full create/read/update/archive for contacts, companies, deals, tickets, quotes, line_items, notes, calls, emails, meetings, and tasks
 - **Batch Operations** — up to 100 objects per call for efficient bulk reads and writes
-- **Smart Search** — filter groups, multiple operators, multi-field sorting, and cursor pagination
+- **Smart & Guided Search** — filter groups with multiple operators and sorting, plus guided helpers (`search_by_property`, `search_recent`) so you don't hand-write filters
+- **Owner Resolution** — translate `hubspot_owner_id` values into real users (name, email)
+- **Pipelines & Stages** — translate `dealstage` / ticket stage IDs into readable stage labels
+- **Custom Object Schemas** — define, inspect, update, and delete custom object types
+- **Engagement Logging** — log a note/call/email/meeting/task and associate it to records in one call
 - **Deal & Quote Assembly** — merge duplicate deals, assemble quotes from existing deals
 - **Association Management** — link any two CRM objects with typed association labels
-- **Custom Properties** — discover, read, and create property definitions for any object type
+- **Properties & Groups** — discover, create, update, and archive property definitions and property groups
 - **Rate Limiting + Retry Logic** — automatic backoff to protect your HubSpot API quota
 - **MCP Resources** — three static reference resources (scope guide, object type catalog, conventions)
 - **MCP Prompts** — five guided workflows to orchestrate multi-step CRM operations
@@ -33,10 +40,14 @@ A Model Context Protocol (MCP) server that gives Claude comprehensive, enterpris
 
 | Domain | Tools | Description |
 |--------|------:|-------------|
-| CRM | 11 | Generic CRUD and batch for all object types (contacts, companies, deals, tickets, quotes, line_items, and engagement types) |
+| CRM | 13 | Generic CRUD and batch for all object types, advanced search, plus guided `search_by_property` / `search_recent` |
 | Sales | 2 | Deal merging and quote assembly |
+| Engagements | 1 | Log a note/call/email/meeting/task and associate it to records in one call |
 | Associations | 5 | Create, archive, list, and batch-create object associations |
-| Properties | 3 | List, get, and create custom property definitions |
+| Properties | 7 | List, get, create, update, archive properties + list/create property groups |
+| Owners | 2 | Resolve `hubspot_owner_id` values to real users (list / get) |
+| Pipelines | 3 | Resolve pipeline and stage IDs to readable stages (list / get / get stages) |
+| Schemas | 5 | Manage custom object type definitions (list / get / create / update / delete) |
 | Workflows v4 BETA | 9 | Create, update, delete, and monitor automation workflows |
 | Automation | 2 | Complete delayed workflow callbacks (single and batch) |
 | Enrollment | 5 | Enroll/unenroll objects in workflows; v3 legacy reads ¹ |
@@ -312,6 +323,31 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for development setup, code style guideli
 ## Security
 
 See [SECURITY.md](SECURITY.md) for the vulnerability reporting policy and security best practices.
+
+---
+
+## About Nubiia
+
+This MCP server is built and maintained by **[Nubiia](https://nubiia.es)**.
+
+[Nubiia](https://nubiia.es) ayuda a empresas a **automatizar procesos e integrar sus herramientas con IA**: servidores MCP a medida, integraciones con CRMs y ERPs (HubSpot, Pipedrive, Holded), y agentes que conectan tus datos de negocio con asistentes como Claude. Este `@nubiia/mcp-hubspot` es un ejemplo open source de lo que hacemos.
+
+👉 ¿Quieres una integración o automatización con IA para tu negocio? **[nubiia.es](https://nubiia.es)** · ✉️ [hola@nubiia.es](mailto:hola@nubiia.es)
+
+---
+
+## Author
+
+Built by **[Nubiia](https://nubiia.es)** — [nubiia.es](https://nubiia.es) · [hola@nubiia.es](mailto:hola@nubiia.es)
+
+Maintainer: Samuel Fraga — [GitHub](https://github.com/iamsamuelfraga)
+
+## Links
+
+- [Nubiia — AI automation & integrations](https://nubiia.es)
+- [npm package](https://www.npmjs.com/package/@nubiia/mcp-hubspot)
+- [GitHub repository](https://github.com/nubiia-dev/mcp-hubspot)
+- [Model Context Protocol](https://modelcontextprotocol.io)
 
 ---
 

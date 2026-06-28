@@ -19,7 +19,13 @@ describe('getEnabledToolsets', () => {
     delete process.env['HUBSPOT_TOOLSETS'];
     const result = getEnabledToolsets();
     expect(result).toEqual([...HUBSPOT_TOOLSETS]);
-    expect(result).toHaveLength(7);
+    expect(result).toHaveLength(8);
+  });
+
+  it('includes the owners toolset and resolves owners_* tool names to it', () => {
+    expect([...HUBSPOT_TOOLSETS]).toContain('owners');
+    expect(findToolset('hubspot_owners_list', HUBSPOT_TOOLSETS)).toBe('owners');
+    expect(findToolset('hubspot_owners_get', HUBSPOT_TOOLSETS)).toBe('owners');
   });
 
   it('returns only the specified toolsets when HUBSPOT_TOOLSETS is set', () => {

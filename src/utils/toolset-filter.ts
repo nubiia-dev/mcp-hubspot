@@ -24,6 +24,7 @@ export const HUBSPOT_TOOLSETS = [
   'workflows',
   'automation',
   'actions',
+  'owners',
 ] as const;
 
 /** Union type of all valid HubSpot toolset names. */
